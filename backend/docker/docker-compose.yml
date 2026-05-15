@@ -1,0 +1,82 @@
+version: "3.9"
+
+# 本地开发依赖三件套 —— MySQL / Milvus / Redis。生产建议托管服务。
+# 启动: docker-compose -f docker/docker-compose.yml up -d
+#
+# 镜像源说明:
+# 不在这里写死镜像源前缀,改在 /etc/docker/daemon.json 配 registry-mirrors,
+# 由 daemon 层统一处理 fallback。这样多源切换不需要改业务配置,符合工程级实践。
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: rag_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: rag_agent
+      MYSQL_USER: rag
+      MYSQL_PASSWORD: ragpass
+    ports:
+      - "3307:3306"   # 宿主机 3306 已被本地 MySQL 占用,这里换 3307,.env 里 MYSQL_PORT 同步改
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  # Milvus 依赖 etcd 和 minio,这里走官方推荐的最小组合
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: rag_etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: rag_minio
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+
+  milvus:
+    image: milvusdb/milvus:v2.4.10
+    container_name: rag_milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    depends_on:
+      - etcd
+      - minio
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+
+volumes:
+  mysql_data:
+  etcd_data:
+  minio_data:
+  milvus_data:

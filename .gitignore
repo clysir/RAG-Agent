@@ -1,0 +1,55 @@
+# ===== 凭证 / secret =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# ===== 测试 / 类型检查 =====
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ===== IDE / OS =====
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# ===== 运行时数据 / 模型缓存 =====
+data/
+logs/
+*.log
+models_cache/
+.huggingface/
+
+# ===== 本地数据库快照 =====
+*.sqlite*
+*.db
+
+# ===== Claude / AI 工具会话 =====
+.claude/
+
+# ===== Docker 本地 volume =====
+docker/volumes/
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# ===== claude.md ======
+CLAUDE.md
