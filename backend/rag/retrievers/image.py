@@ -34,8 +34,9 @@ async def image_search(
     if not hits:
         return []
 
-    # 图像分数同样需要阈值过滤(余弦/IP 已是 -1~1,IP 归一化向量约 0-1)
-    threshold = settings.retrieval.score_threshold
+    # 图像分数归一化后约 0~1。陌生图常落在 0.3~0.5,跟文本侧共用 0.3 会大量误命中。
+    # 用独立的 image_score_threshold(默认 0.55)。
+    threshold = settings.retrieval.image_score_threshold
     filtered = [h for h in hits if h["score"] >= threshold]
     if not filtered:
         return []

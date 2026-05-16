@@ -4,9 +4,11 @@
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.api import api_router
@@ -59,3 +61,11 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
+# local_fs 存储下 presign_url 返回 "/static/{key}",需要这里挂静态目录把图片暴露出来。
+# minio / s3 自带 HTTP 服务,不走这里。
+if settings.storage.provider == "local_fs":
+    static_root = Path(settings.storage.local_root).resolve()
+    static_root.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(static_root)), name="static")
+    logger.info(f"app.static_mounted path=/static root={static_root}")

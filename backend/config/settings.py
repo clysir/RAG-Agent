@@ -131,7 +131,8 @@ class RerankSettings(_SubSettings):
         "local_bge", alias="RERANK_PROVIDER"
     )
     model: str = Field("BAAI/bge-reranker-v2-m3", alias="RERANK_MODEL")
-    top_k: int = Field(10, alias="RERANK_TOP_K")
+    # 留给最终 LLM 上下文的候选数。3-5 即可,多了会稀释 prompt 焦点。
+    top_k: int = Field(5, alias="RERANK_TOP_K")
 
 
 class ChunkingSettings(_SubSettings):
@@ -176,6 +177,9 @@ class RetrievalSettings(_SubSettings):
     fusion_top_k: int = Field(30, alias="RETRIEVAL_FUSION_TOP_K")
     # rerank 后分数阈值,低于则丢弃(防引用噪声)
     score_threshold: float = Field(0.3, alias="RAG_SCORE_THRESHOLD")
+    # 图像检索专用阈值 —— CLIP cos/IP 归一化后,陌生图(库里没有的)分数常在 0.3~0.5 之间,
+    # 用文本侧的 0.3 会大量误命中。0.55 是经验值,真正"同款"通常 ≥ 0.65,"同类"在 0.55~0.65。
+    image_score_threshold: float = Field(0.55, alias="RAG_IMAGE_SCORE_THRESHOLD")
 
 
 class CelerySettings(_SubSettings):

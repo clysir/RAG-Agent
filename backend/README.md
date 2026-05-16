@@ -105,18 +105,25 @@ python -m scripts.seed_data
 # 7. 建索引(文本 + 图像,各 30-50 秒)
 python -m scripts.build_index
 
-# 8. 启动 API
+# 8. 预置管理员账号(默认 admin / admin123,公开注册接口不允许创建 admin)
+python -m scripts.seed_admin
+
+# 9. 启动 API
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 # 或:
 python -m app --dev   # 详尽日志 + SQL echo + latency 打印
 python -m app --op    # 生产模式:INFO 日志 + CORS 收紧
 
-# 9. 启动 Celery(可选,异步任务)
+# 10. 启动 Celery(可选,异步任务)
 celery -A app.workers.celery_app worker --loglevel=info
 celery -A app.workers.celery_app beat --loglevel=info   # 定时任务
 ```
 
 打开 `http://localhost:8000/docs` 看 OpenAPI。
+
+> **docker compose 起来只有 3 个容器?** 是镜像问题。旧版用 `quay.io/coreos/etcd`,国内拉不到 → milvus 起不来。
+> 现在已切到 `bitnami/etcd:3.5`(dockerhub),并给所有 service 都加了 `restart` + `healthcheck`,
+> 用 `condition: service_healthy` 让 milvus 真正等到 etcd/minio 就绪才启动。重新 `up -d` 即可。
 
 ### 验证
 
@@ -192,11 +199,91 @@ async for chunk in llm.chat(messages, stream=True): ...
 
 详情见 [`providers/README.md`](providers/README.md)。
 
+### VLM 接入(强烈建议开)
+
+默认 `VISION_PROVIDER=disabled`,陌生图(数据库里没有的图)只能靠 CLIP 视觉相似度匹配 →
+经常匹到完全不相关的商品(用户实测发生过,匹到一双 ¥773 的复古靴子)。
+
+**开 VLM 之后**,Agent `IMAGE_UNDERSTAND` 状态会把图片描述成一句中文 caption,
+然后这句 caption 喂给 `QUERY_REWRITE` 走文本检索,准确率显著上升。
+
+#### 方案 A:智谱 GLM-4V-Flash(推荐 ✨ 完全免费,步骤最简单)
+
+1. https://open.bigmodel.cn 注册(微信扫码,**不强制实名**)
+2. 控制台「API Keys」→ 新建 → 拿 sk-xxx(新用户送 2000 万 Token,Flash 系列**永久免费**)
+3. 把以下填进 `backend/.env`:
+
+```bash
+VISION_PROVIDER=openai
+VISION_API_KEY=<智谱 sk-xxx>
+VISION_MODEL=glm-4v-flash
+VISION_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+```
+
+智谱兼容 OpenAI 协议,走我们已有的 `openai` vision provider,**不用改代码**。
+
+#### 方案 B:火山方舟豆包(免费额度更大,但要实名 + 创建接入点)
+
+1. 注册 https://www.volcengine.com/ → **完成实名认证**(个人/企业都行)
+2. 进控制台 → 搜「**火山方舟**」(ark)→ 开通
+3. 左侧「**API Key 管理**」→ 新建 → 拿 sk-xxx
+4. 左侧「**在线推理 → 推理接入点 → 创建**」:
+   - 模型选 `doubao-1.5-vision-pro-32k-250115`
+   - 创建后拿到「**接入点 ID**」(`ep-2025xxxxxx-xxxxx`,**不是**模型本名)
+5. **手动激活「协作奖励计划」**(控制台右侧活动区)→ 每天 200 万 Token 可循环免费
+6. 填 `backend/.env`:
+
+```bash
+VISION_PROVIDER=volcengine
+VISION_API_KEY=<火山 sk-xxx>
+VISION_MODEL=<接入点 ID,如 ep-2025xxxxxx-xxxxx>
+VISION_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+```
+
+#### 验证
+
+重启 uvicorn,再发一张图聊天,后端日志会出现:
+
+```
+vision.done provider=openai_vision desc_len=42       # 智谱
+vision.done provider=volcengine_vision desc_len=42   # 豆包
+```
+
+接着 `query_rewrite` 改写后的检索 query 里能看到图片描述的关键词,从此陌生图也走文本路。
+
+
+---
+
+## 🗂️ HTTP 接口分组(简表)
+
+完整定义看 `http://localhost:8000/docs`。
+
+| 路径 | 用途 |
+|---|---|
+| `POST /auth/register` / `register/merchant` / `login` / `sms/*` | 注册/登录(public);**管理员不能注册**,只能 `python -m scripts.seed_admin` |
+| `GET /auth/me` | 当前用户(带 JWT) |
+| `GET /products` | 商品列表 + 筛选 + 分页(public)|
+| `GET /products/{id}` / `categories` / `brands` | 商品详情 + 筛选下拉数据 |
+| `POST /upload/image` | 上传图片,返回 object_key,后续聊天/商品引用 |
+| `POST /chat` (SSE) | 流式聊天,登录用户写库 |
+| `GET /chat/sessions` | 当前用户的会话列表(给 /chat 侧栏)|
+| `GET /chat/sessions/{id}/messages` | 单段对话的全量消息 |
+| `DELETE /chat/sessions/{id}` | 删段对话 |
+| `GET /memory` / `DELETE /memory/{id}` / `POST /memory/forget-all` | PIPL 合规面板 |
+| `POST /merchant/products` / `GET /merchant/submissions` | 商家入驻提交商品 |
+| `GET /admin/submissions` / `POST /admin/submissions/{id}/approve\|reject` | 管理员审核 |
+| `GET /static/*` | local_fs storage 模式下的图片直出(自动挂)|
+
 ---
 
 ## 🧠 两层记忆架构(参考 Mem0 / Letta MemGPT / Zep)
 
+> **这里讲的是 Agent 推理用的"工作内存"。**前端 `/chat` 页左侧栏的历史会话列表
+> 走的是 MySQL `sessions` / `messages` 表(归档型,永久保存,见上面 HTTP 接口分组)。
+> 两者**互不替代**:Redis STM 给 LLM 看(有 token 阈值 + 滚动摘要),MySQL 归档给用户翻历史。
+
 ### 短期记忆(Redis,会话级)
+- 实现:`app/core/memory/short_term.py`
 - key:`mem:stm:{session_id}:turns|summary|slots|turn_count`
 - 最近 `STM_RECENT_TURNS`(默认 8)轮原文保留,超出走滚动摘要
 - 总 token 超 `STM_TOKEN_THRESHOLD`(默认 1500)触发摘要重生成
@@ -252,13 +339,23 @@ async for chunk in llm.chat(messages, stream=True): ...
    - Dense:Milvus 向量召回
    - Sparse:BM25 关键词(`rank-bm25` 内存版)
 2. **RRF 融合**:Reciprocal Rank Fusion 多路合并 → 候选 20-30
-3. **Rerank 精排**:BGE-Reranker-v2-m3 → 取 top 5-10
+3. **Rerank 精排**:BGE-Reranker-v2-m3 → 取 top 5(`RERANK_TOP_K=5`)
 4. **结构化过滤**:价格 / 类目 / 库存等硬条件在 MySQL 层做
+
+### 阈值过滤(防幻觉)
+
+| 路径 | 阈值 env | 默认 | 含义 |
+|---|---|---|---|
+| 文本 rerank 后 | `RAG_SCORE_THRESHOLD` | 0.3 | cross-encoder 分数,低于丢 |
+| 图像检索后 | `RAG_IMAGE_SCORE_THRESHOLD` | 0.55 | CLIP IP 归一化分,陌生图常 < 0.5,共用 0.3 会误命中 |
+| 长期记忆 | `LTM_SCORE_THRESHOLD` | 0.35 | 用户事实相似度 |
+
+低于阈值的候选**不进入 LLM 上下文**。全部被过滤时 Agent 走 `NEED_CLARIFY` 反问或诚实告知"没找到"。
 
 ### 输入分流(Agent 层)
 - 纯文本 → 文本检索
 - 带图片 → 多模态检索(图→图、图→文)
-- 纯图片 → 以图搜图 + 用图生 caption 走文本路
+- 纯图片 → 以图搜图 + (若 VLM 启用)图生 caption 走文本路
 
 详情见 [`rag/README.md`](rag/README.md)。
 

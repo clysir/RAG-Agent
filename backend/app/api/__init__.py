@@ -2,13 +2,14 @@
 
 from fastapi import APIRouter
 
-from app.api import admin, auth, chat, health, memory, merchant, upload
+from app.api import admin, auth, chat, health, memory, merchant, products, upload
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth.router)
 api_router.include_router(upload.router)
 api_router.include_router(chat.router, tags=["chat"])
+api_router.include_router(products.router)
 api_router.include_router(merchant.router)
 api_router.include_router(admin.router)
 api_router.include_router(memory.router)

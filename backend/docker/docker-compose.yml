@@ -1,11 +1,14 @@
 version: "3.9"
 
-# 本地开发依赖三件套 —— MySQL / Milvus / Redis。生产建议托管服务。
-# 启动: docker-compose -f docker/docker-compose.yml up -d
+# 本地开发依赖三件套 —— MySQL / Milvus(+etcd+minio) / Redis。生产建议托管。
+# 启动:
+#   cd backend && docker compose -f docker/docker-compose.yml up -d
+# 停止: docker compose -f docker/docker-compose.yml down
+# 看健康: docker compose -f docker/docker-compose.yml ps
 #
-# 镜像源说明:
-# 不在这里写死镜像源前缀,改在 /etc/docker/daemon.json 配 registry-mirrors,
-# 由 daemon 层统一处理 fallback。这样多源切换不需要改业务配置,符合工程级实践。
+# 关于 etcd 镜像:之前用 quay.io/coreos/etcd:v3.5.5,国内拉不到 → milvus 起不来 → 只看到 mysql/redis/milvus 三个,
+# 现在统一切到 dockerhub 上的 bitnami/etcd,所有镜像都从 dockerhub 拉(配上 daemon 镜像加速器即可全部成功)。
+# 所有 service 都加 restart: unless-stopped + healthcheck,depends_on 用 condition: service_healthy 真正等待依赖就绪。
 
 services:
   mysql:
@@ -24,6 +27,11 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -31,32 +39,52 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  # Milvus 依赖 etcd 和 minio,这里走官方推荐的最小组合
+  # Milvus 依赖 etcd 和 minio
   etcd:
-    image: quay.io/coreos/etcd:v3.5.5
+    # 切到 bitnami(dockerhub),原 quay.io/coreos/etcd 在国内常拉不到
+    image: bitnami/etcd:3.5
     container_name: rag_etcd
+    restart: unless-stopped
     environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
     volumes:
-      - etcd_data:/etcd
-    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+      - etcd_data:/bitnami/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   minio:
     image: minio/minio:RELEASE.2024-05-28T17-19-04Z
     container_name: rag_minio
+    restart: unless-stopped
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
       - minio_data:/minio_data
     command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   milvus:
     image: milvusdb/milvus:v2.4.10
@@ -67,13 +95,20 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     depends_on:
-      - etcd
-      - minio
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     ports:
       - "19530:19530"
       - "9091:9091"
     volumes:
       - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
 volumes:
   mysql_data:
