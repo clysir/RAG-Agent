@@ -2,7 +2,7 @@
 
 > **多模态电商智能导购 Agent**
 
-工程级 RAG 系统:用户用自然语言或图片提问,Agent 自动调用文本 + 多模态混合检索 + 跨模态精排,在 2000+ MUGE 电商 SKU 上给出带引用的推荐回答,全程 SSE 流式输出。前端用 Next.js + shadcn/ui 提供商品浏览 + 悬浮聊天 + 完整聊天页。
+工程级 RAG 系统:用户用自然语言或图片提问,Agent 自动调用文本 + 多模态混合检索 + 跨模态精排,在 2000+ MUGE 电商 SKU 上给出带引用的推荐回答,全程 SSE 流式输出。前端用 Next.js + **Ant Design X** 提供商品浏览 + 悬浮聊天 + 完整聊天页(自带 `ThoughtChain` 把 Agent 8 状态机可视化)。
 
 ---
 
@@ -10,15 +10,14 @@
 
 ```
 rag-agent/
-├── CLAUDE.md          强制规范(技术栈锁定 + 不可违反的规则)
-├── .gitignore         统一忽略(覆盖 backend + frontend)
+├── .gitignore         
 ├── backend/           Python / FastAPI / RAG / Agent / Celery / docker-compose
 │   └── README.md      → 后端完整架构 + 跑法 + 模块文档索引
-└── frontend/          Next.js 15 + shadcn/ui + Zustand + TanStack Query
+└── frontend/          Next.js 16 + Ant Design X + Zustand + TanStack Query
     └── README.md      → 前端架构 + 跑法 + 组件结构
 ```
 
-各子目录有详细 README,**不要在本文件复述**。
+各子目录有详细 README,**不在此复述**。
 
 ---
 
@@ -58,7 +57,7 @@ rag-agent/
 ┌──────────────────────────────────────────────────────────────┐
 │  Agent 状态机 (agent/)                                       │
 │  INTENT → LOAD_MEMORY → IMAGE_UNDERSTAND → QUERY_REWRITE →   │
-│  RETRIEVE(Dense + Sparse + RRF)→                            │
+│  RETRIEVE(Dense + Sparse + RRF)→                             │
 │  RERANK(cross-encoder + 阈值)→ NEED_CLARIFY | RESPOND → END  │
 └──────────────────────┬───────────────────────────────────────┘
                        │
@@ -73,7 +72,7 @@ rag-agent/
        │                │
        ▼                ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  基础设施:MySQL 8 / Milvus 2.4 / Redis / MinIO / Celery     │
+│  基础设施:MySQL 8 / Milvus 2.4 / Redis / MinIO / Celery      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -90,12 +89,13 @@ rag-agent/
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[embedding-local]"
-docker compose -f docker/docker-compose.yml up -d
-cp .env.example .env  # 填 LLM_API_KEY
+docker compose -f docker/docker-compose.yml up -d   # 起 mysql / redis / etcd / minio / milvus(全部)
+cp .env.example .env  # 填 LLM_API_KEY,确认 MYSQL_PORT=3307
 alembic upgrade head
 python -m scripts.download_models
 python -m scripts.seed_data
 python -m scripts.build_index
+python -m scripts.seed_admin                # 预置 admin / admin123 管理员账号
 uvicorn app.main:app --reload --port 8000
 
 # 前端(另开一个终端)
