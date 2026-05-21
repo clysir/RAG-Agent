@@ -52,6 +52,7 @@ async def _check_username_email_free(
     conds = [User.username == username]
     if email:
         conds.append(User.email == email)
+    # or_() 不允许传列表 故需要*解包
     exists = await session.scalar(select(User).where(or_(*conds)))
     if exists is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="username_or_email_taken")
@@ -62,7 +63,7 @@ async def register(
     payload: RegisterRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Envelope[CurrentUser]:
-    """普通用户注册。"""
+    """普通用户注册。 用户名 + 邮箱 + 密码"""
     await _check_username_email_free(session, payload.username, payload.email)
 
     user = User(

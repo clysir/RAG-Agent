@@ -21,12 +21,18 @@ services:
       MYSQL_USER: rag
       MYSQL_PASSWORD: ragpass
     ports:
-      - "3307:3306"   # 宿主机 3306 已被本地 MySQL 占用,这里换 3307,.env 里 MYSQL_PORT 同步改
+      # 占宿主机 3306。如果你本机另装了 MySQL,先把它停掉:
+      #   sudo systemctl stop mysql    (systemd)
+      #   sudo service mysql stop      (sysvinit)
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
+      # 强制让 rag 用户走 mysql_native_password —— aiomysql 跟 sha256_password
+      # 握手有 bug,会报"Access denied"误报。native 100% 兼容。
+      - --default-authentication-plugin=mysql_native_password
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass"]
       interval: 5s
@@ -48,7 +54,7 @@ services:
   # Milvus 依赖 etcd 和 minio
   etcd:
     # 切到 bitnami(dockerhub),原 quay.io/coreos/etcd 在国内常拉不到
-    image: bitnami/etcd:3.5
+    image: bitnamilegacy/etcd:3.5
     container_name: rag_etcd
     restart: unless-stopped
     environment:

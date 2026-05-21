@@ -5,22 +5,23 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-# ProductCandidate 实际定义在 rag.types,这里只是为了向后兼容 re-export。
-# 原因:rag 是底层模块,不能反向 import agent,所以候选类型迁到了 rag 里。
+# 跨层 DTO:商品候选住在 rag.types、网搜结果住在 providers.web_search.base
+# 都是底层模块自己的产物,这里只 re-export 给 agent 内部用,避免 providers/rag 反向 import agent
 from rag.types import ProductCandidate
+from providers.web_search.base import WebResult
 
 
 class AgentState(str, Enum):
     """Agent 状态机的所有状态。
 
     流程: INTENT → (LOAD_MEMORY) → (IMAGE_UNDERSTAND) → QUERY_REWRITE → RETRIEVE
-          → RERANK → (NEED_CLARIFY) → RESPOND → END
+          → RERANK → (NEED_CLARIFY | WEB_FALLBACK) → RESPOND → END
     括号内的状态根据上下文条件触发。
 
-    LOAD_MEMORY:仅当 intent ∈ {SEARCH, RECOMMEND, DETAIL, COMPARE} 时执行,
-                 拉取用户长期事实 + 会话短期摘要/槽位,注入 ctx。
-                 工业共识 (Mem0 / Shopify Sidekick):条件检索胜过无脑注入,
-                 避免 prompt 膨胀降低模型质量。
+    WEB_FALLBACK:RERANK 后 candidates 为空、但意图明确(SEARCH/RECOMMEND/DETAIL/COMPARE)
+                  且信息充分时触发。联网搜索拿外部信息兜底,Respond 用专用 prompt
+                  明确告知"本店没有,以下是网上信息",避免把网搜结果伪装成商品库内容。
+                  失败 / 返回空 → 降级到 NEED_CLARIFY。
     """
 
     INTENT = "intent"  # 意图识别
@@ -29,6 +30,7 @@ class AgentState(str, Enum):
     QUERY_REWRITE = "query_rewrite"  # 检索 query 改写
     RETRIEVE = "retrieve"  # RAG 检索商品库
     RERANK = "rerank"  # 候选精排
+    WEB_FALLBACK = "web_fallback"  # 库里没有但意图明确 → 联网兜底
     NEED_CLARIFY = "need_clarify"  # 信息不足,反问用户
     RESPOND = "respond"  # 生成最终回复
     END = "end"  # 流程结束
@@ -68,6 +70,8 @@ class AgentContext(BaseModel):
     # 扩展 query 集合 —— 含 rewrite + HyDE + MultiQuery,RetrieveTool 用此跑多路召回
     expanded_queries: list[str] = Field(default_factory=list)
     candidates: list[ProductCandidate] = Field(default_factory=list)
+    # WEB_FALLBACK 状态填充的联网搜索结果。非空时 RespondTool 切到 web 专用 prompt。
+    web_results: list[WebResult] = Field(default_factory=list)
     clarify_question: str | None = None  # 需要反问用户时的问题
     final_answer: str = ""  # 最终回复(流式时为累积值)
 

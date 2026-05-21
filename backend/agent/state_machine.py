@@ -24,6 +24,7 @@ from agent.tools import (
     RespondTool,
     RetrieveTool,
     VisionTool,
+    WebSearchTool,
 )
 
 # 触发长期记忆加载的意图集合 —— 闲聊和纯售后跳过
@@ -33,6 +34,10 @@ _INTENTS_NEED_MEMORY = {
     IntentType.DETAIL,
     IntentType.COMPARE,
 }
+
+# 数据库召回为空时,可以走联网搜索兜底的意图集合 —— 用户已经表达了明确的购物需求
+# CHITCHAT / AFTER_SALES 不在内,避免乱走 web(闲聊没必要,售后该走人工)
+_INTENTS_NEED_WEB = _INTENTS_NEED_MEMORY
 
 
 def _route_after_intent(ctx: AgentContext) -> AgentState:
@@ -67,11 +72,42 @@ def _route_after_memory(ctx: AgentContext) -> AgentState:
 
 
 def _route_after_retrieve(ctx: AgentContext) -> AgentState:
-    """检索后的路由 —— 召回为 0 时考虑反问澄清,否则进入精排。"""
+    """检索后的路由 —— 召回为 0 时根据意图决定网搜兜底还是反问。"""
     if not ctx.candidates:
-        # 召回为空,可能是 query 太模糊,反问用户
-        return AgentState.NEED_CLARIFY
+        return _route_no_candidates(ctx)
     return AgentState.RERANK
+
+
+def _route_after_rerank(ctx: AgentContext) -> AgentState:
+    """RERANK 后的路由 —— CLAUDE.md 规则 7:候选为空时不基于低分编造。
+
+    决策树:
+    - 有候选 → RESPOND(基于商品库正常回答)
+    - 无候选 + 意图明确(SEARCH/RECOMMEND/DETAIL/COMPARE)+ web search 启用 → WEB_FALLBACK
+    - 无候选 + 其它 → NEED_CLARIFY(反问澄清)
+    """
+    if ctx.candidates:
+        return AgentState.RESPOND
+    return _route_no_candidates(ctx)
+
+
+def _route_no_candidates(ctx: AgentContext) -> AgentState:
+    """候选为空时的统一路由 —— RETRIEVE 召回空 / RERANK 阈值全过滤共用。"""
+    from config import settings
+
+    if (
+        ctx.intent in _INTENTS_NEED_WEB
+        and settings.web_search.provider != "disabled"
+    ):
+        return AgentState.WEB_FALLBACK
+    return AgentState.NEED_CLARIFY
+
+
+def _route_after_web_fallback(ctx: AgentContext) -> AgentState:
+    """WEB_FALLBACK 之后:有结果走 RESPOND(web 模式 prompt),没结果降级反问。"""
+    if ctx.web_results:
+        return AgentState.RESPOND
+    return AgentState.NEED_CLARIFY
 
 
 class Agent:
@@ -91,6 +127,7 @@ class Agent:
         self.query_rewrite_tool = QueryRewriteTool()
         self.retrieve_tool = RetrieveTool()
         self.rerank_tool = RerankTool()
+        self.web_search_tool = WebSearchTool()
         self.clarify_tool = ClarifyTool()
         self.respond_tool = RespondTool()
 
@@ -150,11 +187,14 @@ class Agent:
             return _route_after_retrieve(ctx)
 
         if state == AgentState.RERANK:
-            # cross-encoder 精排 + 阈值过滤,候选清空则走 NEED_CLARIFY
+            # cross-encoder 精排 + 阈值过滤,候选清空则走 web 兜底或反问
             await self.rerank_tool.execute(ctx)
-            if not ctx.candidates:
-                return AgentState.NEED_CLARIFY
-            return AgentState.RESPOND
+            return _route_after_rerank(ctx)
+
+        if state == AgentState.WEB_FALLBACK:
+            # 联网搜索兜底,失败 / 空返回都会让 ctx.web_results=[],路由再降级到反问
+            await self.web_search_tool.execute(ctx)
+            return _route_after_web_fallback(ctx)
 
         if state == AgentState.NEED_CLARIFY:
             # LLM 生成针对性反问,而不是写死兜底语
@@ -175,7 +215,7 @@ async def stream_agent(ctx: AgentContext) -> AsyncIterator[AgentEvent]:
     """对外便捷入口 —— 直接拿事件流,内部会把 RESPOND 阶段拆成逐 token 推送。
 
     实现说明:
-    把 RESPOND 之前的状态用 Agent.run() 跑完,到达 RESPOND 时切换为
+    把 RESPOND 之前的状态用 Agent.run() 跑完 (其实这里没用run跑 写了一个while去跑,达到SSE输出的效果),到达 RESPOND 时切换为
     RespondTool.stream() 逐 token 吐出 token 事件,最后再补一个 done 事件。
     这样保证 SSE 体验是"先看到状态进度,再看到流式文字"。
 
@@ -259,7 +299,15 @@ async def stream_agent(ctx: AgentContext) -> AsyncIterator[AgentEvent]:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"stm.summary_refresh_fail trace_id={ctx.trace_id} err={e}")
 
-    yield AgentEvent(type="done", state=AgentState.END, data={"answer": ctx.final_answer})
+    yield AgentEvent(
+        type="done",
+        state=AgentState.END,
+        data={
+            "answer": ctx.final_answer,
+            # 把网搜来源透传给前端,展示在消息底部的"网络搜索结果"卡片区
+            "web_sources": [r.model_dump() for r in ctx.web_results],
+        },
+    )
 
 
 def new_trace_id() -> str:

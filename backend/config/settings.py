@@ -43,6 +43,7 @@ class MySQLSettings(_SubSettings):
     db: str = Field("rag_agent", alias="MYSQL_DB")
 
     @property
+    # 将方法伪装成属性
     def async_dsn(self) -> str:
         pwd = self.password.get_secret_value()
         return f"mysql+aiomysql://{self.user}:{pwd}@{self.host}:{self.port}/{self.db}"
@@ -290,6 +291,28 @@ class VisionSettings(_SubSettings):
     max_tokens: int = Field(256, alias="VISION_MAX_TOKENS")
 
 
+class WebSearchSettings(_SubSettings):
+    """Web Search Provider 配置 —— 数据库召回不到时的兜底联网搜索。
+
+    provider:
+    - disabled:不启用,即使候选为空也走 NEED_CLARIFY
+    - zhipu:智谱 web-search-pro 工具,复用 VISION_API_KEY(都是智谱平台 API Key)即可
+    """
+
+    provider: Literal["disabled", "zhipu"] = Field("disabled", alias="WEB_SEARCH_PROVIDER")
+    api_key: SecretStr = Field(SecretStr(""), alias="WEB_SEARCH_API_KEY")
+    base_url: str = Field(
+        "https://open.bigmodel.cn/api/paas/v4", alias="WEB_SEARCH_BASE_URL"
+    )
+    # 智谱搜索引擎:search_std / search_pro / search_pro_sogou / search_pro_quark
+    engine: str = Field("search_pro", alias="WEB_SEARCH_ENGINE")
+    # 返回条数(1-50)
+    count: int = Field(5, ge=1, le=50, alias="WEB_SEARCH_COUNT")
+    # 时间过滤:noLimit / oneDay / oneWeek / oneMonth / oneYear
+    recency: str = Field("noLimit", alias="WEB_SEARCH_RECENCY")
+    timeout: int = Field(20, alias="WEB_SEARCH_TIMEOUT")
+
+
 class Settings(BaseSettings):
     """全局配置聚合 —— `from config import settings` 拿实例。"""
 
@@ -325,6 +348,7 @@ class Settings(BaseSettings):
     sms: SmsSettings = Field(default_factory=SmsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)
+    web_search: WebSearchSettings = Field(default_factory=WebSearchSettings)
 
     # ====== 派生属性 —— 业务代码统一用这些 ======
     @property

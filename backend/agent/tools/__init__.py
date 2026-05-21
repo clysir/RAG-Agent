@@ -9,6 +9,7 @@ from agent.tools.rerank import RerankTool
 from agent.tools.respond import RespondTool
 from agent.tools.retrieve import RetrieveTool
 from agent.tools.vision import VisionTool
+from agent.tools.web_search import WebSearchTool
 
 __all__ = [
     "Tool",
@@ -20,4 +21,5 @@ __all__ = [
     "RerankTool",
     "ClarifyTool",
     "RespondTool",
+    "WebSearchTool",
 ]

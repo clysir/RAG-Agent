@@ -1,6 +1,6 @@
 """SQLAlchemy 2.0 异步会话工厂 —— 业务代码通过 FastAPI 依赖注入拿 session。
 
-echo 由 settings.sql_echo 控制(dev=True / op=False),不要在这里硬编码。
+echo 由 settings.sql_echo 控制(dev=True / op=False),不在这里硬编码。
 """
 
 from collections.abc import AsyncIterator

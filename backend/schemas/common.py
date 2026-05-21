@@ -11,9 +11,9 @@ class APIModel(BaseModel):
     """所有对外 API 模型的基类 —— 启用按名/别名都能填充,序列化用别名。"""
 
     model_config = ConfigDict(
-        populate_by_name=True,
+        populate_by_name=True,  # 支持按名/别名都能填充
         from_attributes=True,  # 支持从 ORM 对象直接构造
-        str_strip_whitespace=True,
+        str_strip_whitespace=True,  # 自动去除首尾空格
     )
 
 
