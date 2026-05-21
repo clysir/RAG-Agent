@@ -92,6 +92,7 @@ export type AgentState =
   | 'query_rewrite'
   | 'retrieve'
   | 'rerank'
+  | 'web_fallback'
   | 'need_clarify'
   | 'respond'
   | 'end';
@@ -107,6 +108,15 @@ export interface ProductCard {
   extra?: Record<string, unknown> | null;
 }
 
+// 联网搜索结果(WEB_FALLBACK 状态产出)
+export interface WebSource {
+  title: string;
+  url: string;
+  snippet?: string;
+  source?: string;          // 域名,如 nike.com.cn
+  publish_date?: string | null;
+}
+
 // SSE 事件类型联合体 —— 后端 schemas/agent.py 的 AgentEvent 翻译
 export type AgentEvent =
   | { type: 'state_change'; state: AgentState; data?: null }
@@ -114,7 +124,7 @@ export type AgentEvent =
   | { type: 'token'; state?: AgentState; data: string }
   | { type: 'citations'; data: ProductCard[] }
   | { type: 'error'; data: { msg: string } }
-  | { type: 'done'; data: { answer: string; citations?: ProductCard[] } };
+  | { type: 'done'; data: { answer: string; citations?: ProductCard[]; web_sources?: WebSource[] } };
 
 // 前端聊天消息(本地维护,不在后端 schema 里)
 export interface ChatMessage {
@@ -123,6 +133,7 @@ export interface ChatMessage {
   content: string;
   image_url?: string | null; // user 消息附带的图(展示用)
   citations?: ProductCard[]; // assistant 消息引用的商品卡
+  web_sources?: WebSource[]; // 联网兜底时的网搜来源
   created_at: number; // unix ms
   /** 当前轮正在 SSE 中的 assistant 占位消息为 true;历史 / 收尾后为 false。
    *  用来控制 Bubble 的 typing 动画 —— 历史消息不该再有打字过场。 */

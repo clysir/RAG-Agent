@@ -25,6 +25,7 @@ import { uploadApi } from '../../lib/api/upload';
 import { useChatStore } from '../../store/chatStore';
 import { CitationCards } from './CitationCards';
 import { ThoughtChainPanel } from './ThoughtChainPanel';
+import { WebSourceCards } from './WebSourceCards';
 import type { ChatMessage } from '../../lib/types';
 
 type CustomUploadArg = Parameters<NonNullable<UploadProps['customRequest']>>[0];
@@ -222,6 +223,17 @@ function MessageBubble({ message: m, compact }: { message: ChatMessage; compact?
     );
   }
   // assistant
+  const footer =
+    (m.citations && m.citations.length > 0) || (m.web_sources && m.web_sources.length > 0) ? (
+      <div>
+        {m.citations && m.citations.length > 0 && (
+          <CitationCards citations={m.citations} compact={compact} />
+        )}
+        {m.web_sources && m.web_sources.length > 0 && (
+          <WebSourceCards sources={m.web_sources} compact={compact} />
+        )}
+      </div>
+    ) : undefined;
   return (
     <Bubble
       placement="start"
@@ -229,11 +241,7 @@ function MessageBubble({ message: m, compact }: { message: ChatMessage; compact?
       content={m.content || ' '}
       loading={m.content === '' && m.streaming === true}
       typing={m.streaming ? true : undefined}
-      footer={
-        m.citations && m.citations.length > 0 ? (
-          <CitationCards citations={m.citations} compact={compact} />
-        ) : undefined
-      }
+      footer={footer}
     />
   );
 }

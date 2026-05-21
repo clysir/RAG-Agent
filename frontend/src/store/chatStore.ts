@@ -280,10 +280,16 @@ function applyEvent(ev: AgentEvent, assistantId: string, set: SetFn, get: GetFn)
     case 'done': {
       const final = ev.data;
       const citations = final.citations ?? get().pendingCitations;
+      const webSources = final.web_sources;
       set((s) => ({
         messages: s.messages.map((m) =>
           m.id === assistantId
-            ? { ...m, content: final.answer || s.pendingContent || m.content, citations }
+            ? {
+                ...m,
+                content: final.answer || s.pendingContent || m.content,
+                citations,
+                web_sources: webSources && webSources.length > 0 ? webSources : undefined,
+              }
             : m,
         ),
         // 标记所有 running 步骤完成

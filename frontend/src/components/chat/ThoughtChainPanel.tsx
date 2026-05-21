@@ -22,6 +22,7 @@ const STATE_LABEL: Record<AgentState, string> = {
   query_rewrite: '查询改写',
   retrieve: '多路召回',
   rerank: '精排',
+  web_fallback: '联网搜索',
   need_clarify: '反问澄清',
   respond: '生成回答',
   end: '完成',
